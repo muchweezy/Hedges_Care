@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Navigation from '@/components/layout/Navigation';
 import Footer from '@/components/layout/Footer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,22 +7,31 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  Building2, 
-  Users, 
-  Globe, 
-  HandHeart, 
-  Award, 
-  Mail, 
-  Phone, 
+import {
+  Building2,
+  Users,
+  Globe,
+  HandHeart,
+  Award,
+  Mail,
+  Phone,
   MapPin,
   ExternalLink,
   Download,
   FileText,
-  Target
+  Target,
+  ShieldCheck,
+  Plus
 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
+import { fabricGateway } from '@/fabric';
+import PartnershipCard from '@/components/fabric/PartnershipCard';
+import PartnershipDashboard from '@/components/fabric/PartnershipDashboard';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import type { Partnership } from '@/fabric';
 
 interface Partner {
   id: string;
@@ -44,6 +53,11 @@ interface DeploymentMetrics {
 }
 
 const Partnerships = () => {
+  const [userOrgId, setUserOrgId] = useState<string>('Org1MSP');
+  const [blockchainPartnerships, setBlockchainPartnerships] = useState<Partnership[]>([]);
+  const [selectedPartnership, setSelectedPartnership] = useState<string | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [contactForm, setContactForm] = useState({
     organization: '',
     email: '',
@@ -61,6 +75,88 @@ const Partnerships = () => {
 
   const { t } = useLanguage();
   const { toast } = useToast();
+
+  // Load blockchain partnerships
+  useEffect(() => {
+    loadBlockchainPartnerships();
+  }, [userOrgId]);
+
+  const loadBlockchainPartnerships = async () => {
+    try {
+      setLoading(true);
+      await fabricGateway.initialize();
+      const partnershipService = fabricGateway.getPartnershipService();
+      const partnerships = await partnershipService.getActivePartnerships(userOrgId);
+      setBlockchainPartnerships(partnerships);
+    } catch (error) {
+      console.error('Failed to load blockchain partnerships:', error);
+      toast({
+        title: 'Warning',
+        description: 'Unable to load blockchain partnerships. Make sure Fabric network is running.',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreatePartnership = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const partnershipService = fabricGateway.getPartnershipService();
+      await partnershipService.createPartnership({
+        org1Id: userOrgId,
+        org2Id: createForm.partnerOrgId,
+        org1Name: 'Hedges Care',
+        org2Name: createForm.partnerOrgName,
+        agreementHash: await calculateHash(createForm.agreementFile),
+        startDate: createForm.startDate,
+        endDate: createForm.endDate,
+        partnershipType: createForm.partnershipType
+      });
+
+      toast({
+        title: 'Success',
+        description: 'Partnership created on blockchain'
+      });
+
+      setShowCreateDialog(false);
+      setCreateForm({
+        partnerOrgId: '',
+        partnerOrgName: '',
+        agreementFile: null as any,
+        startDate: '',
+        endDate: '',
+        partnershipType: 'landscaping'
+      });
+
+      loadBlockchainPartnerships();
+    } catch (error) {
+      console.error('Failed to create partnership:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to create partnership on blockchain',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const calculateHash = async (file: File | null): Promise<string> => {
+    if (!file) return '';
+    const buffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const [createForm, setCreateForm] = useState({
+    partnerOrgId: '',
+    partnerOrgName: '',
+    agreementFile: null as File | null,
+    startDate: '',
+    endDate: '',
+    partnershipType: 'landscaping' as const
+  });
 
   const partners: Partner[] = [
     {
@@ -221,8 +317,12 @@ const Partnerships = () => {
           </Card>
         </div>
 
-        <Tabs defaultValue="partners" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+        <Tabs defaultValue="blockchain" className="w-full">
+          <TabsList className="grid w-full grid-cols-5">
+            <TabsTrigger value="blockchain" className="gap-2">
+              <ShieldCheck className="h-4 w-4" />
+              Blockchain
+            </TabsTrigger>
             <TabsTrigger value="partners" className="gap-2">
               <Building2 className="h-4 w-4" />
               Partners
@@ -240,6 +340,59 @@ const Partnerships = () => {
               Partner with Us
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="blockchain" className="space-y-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                  Blockchain-Verified Partnerships
+                </h2>
+                <p className="text-gray-600">
+                  Partnerships recorded on Hyperledger Fabric with immutable milestone tracking
+                </p>
+              </div>
+              <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Create Partnership
+              </Button>
+            </div>
+
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+                  <p className="text-gray-600">Loading partnerships from blockchain...</p>
+                </div>
+              </div>
+            ) : blockchainPartnerships.length === 0 ? (
+              <Card>
+                <CardContent className="text-center py-12">
+                  <ShieldCheck className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold mb-2 text-gray-900">No Blockchain Partnerships</h3>
+                  <p className="text-gray-600 mb-6">
+                    You don't have any partnerships recorded on the blockchain yet.
+                  </p>
+                  <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Create Your First Partnership
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {blockchainPartnerships.map((partnership) => (
+                  <PartnershipCard
+                    key={partnership.partnershipId}
+                    partnership={partnership}
+                    userOrgId={userOrgId}
+                    onUpdateMilestone={() => setSelectedPartnership(partnership.partnershipId)}
+                    onUploadEvidence={() => setSelectedPartnership(partnership.partnershipId)}
+                    onViewDetails={() => setSelectedPartnership(partnership.partnershipId)}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
 
           <TabsContent value="partners" className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -634,6 +787,113 @@ const Partnerships = () => {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Create Partnership Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create New Blockchain Partnership</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreatePartnership} className="space-y-4">
+            <div>
+              <Label>Partner Organization</Label>
+              <Input
+                placeholder="e.g., Org2MSP"
+                value={createForm.partnerOrgId}
+                onChange={(e) => setCreateForm({ ...createForm, partnerOrgId: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <Label>Partner Organization Name</Label>
+              <Input
+                placeholder="e.g., Partner Nursery Ltd."
+                value={createForm.partnerOrgName}
+                onChange={(e) => setCreateForm({ ...createForm, partnerOrgName: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <Label>Partnership Type</Label>
+              <Select
+                value={createForm.partnershipType}
+                onValueChange={(value) => setCreateForm({ ...createForm, partnershipType: value as any })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="landscaping">Landscaping Project</SelectItem>
+                  <SelectItem value="nursery_supply">Nursery Supply</SelectItem>
+                  <SelectItem value="enterprise_contract">Enterprise Contract</SelectItem>
+                  <SelectItem value="research_collaboration">Research Collaboration</SelectItem>
+                  <SelectItem value="certification">Certification</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Start Date</Label>
+                <Input
+                  type="date"
+                  value={createForm.startDate}
+                  onChange={(e) => setCreateForm({ ...createForm, startDate: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label>End Date</Label>
+                <Input
+                  type="date"
+                  value={createForm.endDate}
+                  onChange={(e) => setCreateForm({ ...createForm, endDate: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Partnership Agreement</Label>
+              <Input
+                type="file"
+                onChange={(e) => setCreateForm({ ...createForm, agreementFile: e.target.files?.[0] || null })}
+                accept=".pdf,.doc,.docx"
+                required
+              />
+              <p className="text-sm text-gray-600 mt-1">
+                The agreement file will be hashed and recorded on the blockchain
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button type="submit" className="flex-1 gap-2">
+                <ShieldCheck className="h-4 w-4" />
+                Create Partnership on Blockchain
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowCreateDialog(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Partnership Details Modal */}
+      {selectedPartnership && (
+        <Dialog open={!!selectedPartnership} onOpenChange={(open) => !open && setSelectedPartnership(null)}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Partnership Details</DialogTitle>
+            </DialogHeader>
+            <PartnershipDashboard
+              partnershipId={selectedPartnership}
+              onClose={() => setSelectedPartnership(null)}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
       
       <Footer />
     </div>
